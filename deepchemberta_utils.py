@@ -7,7 +7,6 @@ from sklearn.metrics import precision_recall_curve, precision_score, recall_scor
 from tensorflow.keras.layers import Dropout, Dense, BatchNormalization, Activation
 from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
 from DeepChemBERTa import Drug_Target_Prediction
-from tensorflow.keras.preprocessing.sequence import pad_sequences
 import tensorflow as tf
 from rdkit import Chem
 import pandas as pd
