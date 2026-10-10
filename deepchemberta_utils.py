@@ -21,7 +21,10 @@ import os
 
 seq_rdic = ['A','I','L','V','F','W','Y','N','C','Q','M','S','T','D','E','R','H','K','G','P','O','U','X','B','Z']
 seq_dic = {w: i+1 for i,w in enumerate(seq_rdic)}
+#ChemBERTa embeddings: A dictionary with canonical SMILES as keys, and ChemBERTa embeddings as values
 chemberta_embeddings_dic = pickle.load(open('Compounds_ChemBERTa_embeddings.pickle', 'rb'))
+#A dictionary with Sequences as keys, and numpy arrays with shape of (1400, 128) as values representing the ESM3 of the residues
+esm3_embeddings_dic = pickle.load(open('ESM3_Embeddings_ChEMBL_PAH_I65T_GCDH_R227P_Residues.pickle', 'rb'))
 
 
 def encodeSeq(seq, seq_dic):
@@ -44,6 +47,12 @@ def get_ChemBERTa_embeddings(smiles):
     if(smiles not in chemberta_embeddings_dic):
         raise ValueError(f"There is no extracted ChemBERTa embeddings: {smiles}")
     return chemberta_embeddings_dic[smiles]
+
+
+def get_ESM3_embeddings(sequence):
+    if(sequence not in esm3_embeddings_dic):
+        raise ValueError(f"There is no extracted ESM3 embeddings: {sequence}")
+    return esm3_embeddings_dic[sequence]
 
 
 def parse_to_standard(data_dir, with_label=True, prot_len=1400):
