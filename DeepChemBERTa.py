@@ -116,27 +116,43 @@ class Drug_Target_Prediction(object):
         return input_layer_c
 
     
+        
     def build_protein_branch(self, input_p):
-        if(self.__prot_vec == "Convolution"):
-            model_p = Embedding(26, 20,
-                                embeddings_initializer=self.__initializer,
-                                embeddings_regularizer=l2(self.__regularizer_param))(input_p)
-            model_p = SpatialDropout1D(0.2)(model_p)
-            model_ps = [self.PLayer(stride, self.__filters, self.__activation,
-                                    self.__initializer, self.__regularizer_param)(model_p)
-                        for stride in self.__protein_strides]
-            model_p = Concatenate(axis=1)(model_ps) if len(model_ps) > 1 else model_ps[0]
+        if self.__prot_vec == "Convolution":
+            # input_p shape: (batch_size, 1400, 128)
+            model_p = SpatialDropout1D(0.2)(input_p)
+
+            model_ps = [
+                self.PLayer(
+                    stride,
+                    self.__filters,
+                    self.__activation,
+                    self.__initializer,
+                    self.__regularizer_param
+                )(model_p)
+                for stride in self.__protein_strides
+            ]
+
+            model_p = (
+                Concatenate(axis=1)(model_ps)
+                if len(model_ps) > 1
+                else model_ps[0]
+            )
         else:
             model_p = input_p
-        if(self.__protein_layers):
+
+        if self.__protein_layers:
             input_layer_p = model_p
+
             for layer_size in self.return_tuple(self.__protein_layers):
                 model_p = Dense(layer_size, **self.params_dic)(input_layer_p)
                 model_p = BatchNormalization()(model_p)
                 model_p = Activation(self.__activation)(model_p)
                 model_p = Dropout(self.__dropout)(model_p)
                 input_layer_p = model_p
+
         return model_p
+
 
     
     def interaction_features(self, model_c, model_d, model_p):

@@ -17,20 +17,11 @@ import time
 import os
 
 
-
-seq_rdic = ['A','I','L','V','F','W','Y','N','C','Q','M','S','T','D','E','R','H','K','G','P','O','U','X','B','Z']
-seq_dic = {w: i+1 for i,w in enumerate(seq_rdic)}
 #ChemBERTa embeddings: A dictionary with canonical SMILES as keys, and ChemBERTa embeddings as values
 chemberta_embeddings_dic = pickle.load(open('Compounds_ChemBERTa_embeddings.pickle', 'rb'))
 #A dictionary with Sequences as keys, and numpy arrays with shape of (1400, 128) as values representing the ESM3 of the residues
 esm3_embeddings_dic = pickle.load(open('ESM3_Embeddings_ChEMBL_PAH_I65T_GCDH_R227P_Residues.pickle', 'rb'))
 
-
-def encodeSeq(seq, seq_dic):
-    if pd.isnull(seq):
-        return [0]
-    else:
-        return [seq_dic[aa] for aa in seq]
 
 
 def generate_morgan_fp(smiles):
@@ -73,9 +64,8 @@ def parse_to_standard(data_dir, with_label=True, prot_len=1400):
     data.loc[high_mask, tsa_col] = 6 + (data.loc[high_mask, tsa_col] - high_min) * (7 - 6) / (high_max - high_min)
     # END: Rescale the values Higher than 6.0 and less than -6.0
     
-    data["encoded_sequence"] = data.Sequence.map(lambda a: encodeSeq(a, seq_dic))
-    protein_feature = pad_sequences(
-        data["encoded_sequence"].values, prot_len
+    protein_feature = np.stack(
+        [get_ESM3_embeddings(seq) for seq in  data["Sequence"]]
     )
     drug_feature = np.stack([generate_morgan_fp(s) for s in data["Canonical SMILES"]])
     chemberta_features = np.stack(
@@ -107,9 +97,9 @@ def parse_to_standard(data_dir, with_label=True, prot_len=1400):
 def parse_for_inference(data_dir, prot_len=1400):
     data = pd.read_csv(data_dir)
     # Get the maximum protein length
-    data["encoded_sequence"] = data.Sequence.map(lambda a: encodeSeq(a, seq_dic))
-    protein_feature = pad_sequences(
-        data["encoded_sequence"].values, prot_len
+    
+    protein_feature = np.stack(
+        [get_ESM3_embeddings(seq) for seq in  data["Sequence"]]
     )
     drug_feature = np.stack([generate_morgan_fp(s) for s in data["Canonical SMILES"]])
     chemberta_features = np.stack(
@@ -211,7 +201,7 @@ def run_deepchemberta(data_path, result_path=None, load_modell=None, save_model=
     dti_prediction_model = Drug_Target_Prediction(**model_params)
     # For instance: my_model.h5
     if(load_modell):
-        print(f">>>>>>>>>>>>>>>>> Loading the model (DeepChemBERTa_Stabilization): {load_modell}")
+        print(f">>>>>>>>>>>>>>>>> Loading the model (DeepChemBERTa: Compound-based Stabilization Predictor): {load_modell}")
         dti_prediction_model.load(f'saved_models/{load_modell}')
     dti_prediction_model.summary()
     
