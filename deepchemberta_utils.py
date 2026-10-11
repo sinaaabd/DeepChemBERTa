@@ -45,7 +45,7 @@ def get_ESM3_embeddings(sequence):
     return esm3_embeddings_dic[sequence]
 
 
-def parse_to_standard(data_dir, with_label=True, prot_len=1400):
+def parse_to_standard(data_dir, with_label=True):
     data = pd.read_csv(data_dir)
     # get maximum protein length
     tsa_col = "delta_Thermal_Shift"
@@ -72,7 +72,7 @@ def parse_to_standard(data_dir, with_label=True, prot_len=1400):
         [get_ChemBERTa_embeddings(smiles) for smiles in  data["Canonical SMILES"]]
     )
     if(with_label):        
-        bin_edges = [-np.inf,-6,-5.5,-4.5,-3.5,-2.5,-1.5,-1.0,-0.8,-0.6,-0.24,0.0,0.5,1.0,1.5,2.0,2.5,3.0,3.5,4.5,6.0,np.inf]
+        bin_edges = [-np.inf,-6,-4.5,-3.5,-2.5,-1.5,-1.0,-0.8,-0.6,-0.24,0.0,0.5,1.0,1.5,2.0,2.5,3.2,4,4.8,6.0,np.inf]
         data['bin'] = pd.cut(
             data['delta_Thermal_Shift'],
             bins=bin_edges,
@@ -94,7 +94,7 @@ def parse_to_standard(data_dir, with_label=True, prot_len=1400):
 
 
 
-def parse_for_inference(data_dir, prot_len=1400):
+def parse_for_inference(data_dir):
     data = pd.read_csv(data_dir)
     # Get the maximum protein length
     
@@ -140,6 +140,7 @@ def get_args():
         n_epoch=150,
         prot_vec="Convolution",
         prot_len=1400,
+        aa_dim=128,
         drug_vec="morgan_fp_r2",
         drug_len=2048,
         activation="relu",
@@ -175,6 +176,7 @@ def run_deepchemberta(data_path, result_path=None, load_modell=None, save_model=
     type_params = {
         "prot_vec": args.prot_vec,
         "prot_len": args.prot_len,
+        "aa_dim": args.aa_dim,
         "drug_vec": args.drug_vec,
         "drug_len": args.drug_len,
     }
@@ -227,7 +229,7 @@ def run_deepchemberta(data_path, result_path=None, load_modell=None, save_model=
                 trained_model = dti_prediction_model.fit(**train_dic)
 
                 data_path_val = os.path.join(data_path, f'{validation}.csv')
-                val_dic = parse_to_standard(data_path_val, with_label=True, prot_len=1400)
+                val_dic = parse_to_standard(data_path_val, with_label=True)
                 
                 val_dic = {"test": val_dic}
                 current_rmse = test_tsa_model(dti_prediction_model, val_dic, result_path, validation, True)
@@ -259,7 +261,7 @@ def run_deepchemberta(data_path, result_path=None, load_modell=None, save_model=
         print(f">>>>>>>>>>>>>>>>> Testing the model using {test} file!")
         data_path_test = os.path.join(data_path, f'{test}.csv')
         inference_start = time.time()
-        test_dic = parse_to_standard(data_path_test, with_label=True, prot_len=1400)
+        test_dic = parse_to_standard(data_path_test, with_label=True)
         test_dic = {"test": test_dic}
         rmse = test_tsa_model(dti_prediction_model, test_dic, result_path, test, False)
         print(f"MSE = {rmse}")

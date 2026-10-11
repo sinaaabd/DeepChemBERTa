@@ -36,7 +36,7 @@ class Drug_Target_Prediction(object):
 
     def __init__(self, dropout=0.2, drug_layers=(512, 128), protein_windows=(10, 15, 20, 25, 30),
                  filters=128, learning_rate=1e-4, decay=1e-4, fc_layers=None, final_fc_layers=None, prot_vec=None,
-                 prot_len=1400, activation="relu", drug_len=2048, drug_vec="ECFP4",
+                 prot_len=1400, aa_dim=128, activation="relu", drug_len=2048, drug_vec="ECFP4",
                  protein_layers=None):
 
         self.__dropout = dropout
@@ -49,6 +49,7 @@ class Drug_Target_Prediction(object):
         self.__learning_rate = learning_rate
         self.__prot_vec = prot_vec
         self.__prot_len = prot_len
+        self.__aa_dim = aa_dim
         self.__drug_vec = drug_vec
         self.__drug_len = drug_len
         self.__drug_chemberta_len = 384
@@ -120,7 +121,8 @@ class Drug_Target_Prediction(object):
     def build_protein_branch(self, input_p):
         if self.__prot_vec == "Convolution":
             # input_p shape: (batch_size, 1400, 128)
-            model_p = SpatialDropout1D(0.2)(input_p)
+            model_p = Dense(20, **self.params_dic)(input_p)
+            model_p = SpatialDropout1D(0.2)(model_p)
 
             model_ps = [
                 self.PLayer(
@@ -169,7 +171,7 @@ class Drug_Target_Prediction(object):
     def modelv(self):
         input_chemberta = Input(shape=(self.__drug_chemberta_len,))
         input_d = Input(shape=(self.__drug_len,))
-        input_p = Input(shape=(self.__prot_len,))
+        input_p = Input(shape=(self.__prot_len,self.__aa_dim))
         model_c = self.build_chemberta_branch(input_chemberta)
         model_d = self.build_drug_branch(input_d)
         model_p = self.build_protein_branch(input_p)
@@ -191,7 +193,7 @@ class Drug_Target_Prediction(object):
     def feature_extractor(self):
         input_chemberta = Input(shape=(self.__drug_chemberta_len,))
         input_d = Input(shape=(self.__drug_len,))
-        input_p = Input(shape=(self.__prot_len,))
+        input_p = Input(shape=(self.__prot_len,self.__aa_dim))
         model_c = self.build_chemberta_branch(input_chemberta)
         model_d = self.build_drug_branch(input_d)
         model_p = self.build_protein_branch(input_p)

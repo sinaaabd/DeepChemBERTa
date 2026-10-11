@@ -57,20 +57,21 @@ if __name__ == "__main__":
     i = 0
     j = 1
     for smiles in all_smiles:
-        i += 1
-        if(i % 1000 == 0):
-            print(j, end='\t')
-            j += 1
-            pickle.dump(chemberta_embeddings, open(args.pickle_file_adr_name, 'wb'))
-        # Tokenize the SMILES
-        inputs = tokenizer(smiles, return_tensors="pt", padding=True, truncation=True)
-        inputs = {k: v.to("cpu") for k, v in inputs.items()}
-        # Get embedding (CLS token)
-        with torch.no_grad():
-            outputs = model(**inputs)
-            cls_embedding = outputs.last_hidden_state[:, 0, :]  # (1, hidden_dim)
-        # Convert to numpy array
-        embedding = cls_embedding.squeeze().cpu().numpy()  # shape: (hidden_dim,)
-        chemberta_embeddings[smiles] = embedding
+        if(smiles not in chemberta_embeddings):
+            i += 1
+            if(i % 1000 == 0):
+                print(j, end='\t')
+                j += 1
+                pickle.dump(chemberta_embeddings, open(args.pickle_file_adr_name, 'wb'))
+            # Tokenize the SMILES
+            inputs = tokenizer(smiles, return_tensors="pt", padding=True, truncation=True)
+            inputs = {k: v.to("cpu") for k, v in inputs.items()}
+            # Get embedding (CLS token)
+            with torch.no_grad():
+                outputs = model(**inputs)
+                cls_embedding = outputs.last_hidden_state[:, 0, :]  # (1, hidden_dim)
+            # Convert to numpy array
+            embedding = cls_embedding.squeeze().cpu().numpy()  # shape: (hidden_dim,)
+            chemberta_embeddings[smiles] = embedding
 
     pickle.dump(chemberta_embeddings, open(args.pickle_file_adr_name, 'wb'))

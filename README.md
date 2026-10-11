@@ -18,7 +18,7 @@ pip install tensorflow[and-cuda]==2.15.*
 Before using the model, make sure that you have already extracted the ChemBERTa features for the compounds used in the training, test, validation, or inference sets, and stored them in a pickle file. Moreover, ensure that the compound representations are converted into Canonical SMILES format. You can perform both the conversion and the feature extraction using the following command:
 
 ```
-python chemberta_extraction.py --smiles_csv_header <smiles-col-header> --csv_file <input-data-complete-name> --pickle_file_adr_name Compounds_ChemBERTa_embeddings.pickle --convert_to_canonical
+python generate_chemberta_embeddings.py --smiles_csv_header <smiles-col-header> --csv_file <input-data-complete-name> --pickle_file_adr_name Compounds_ChemBERTa_embeddings.pickle --output_csv <output-csv-file-containing-canonical-SMILES> --convert_to_canonical 
 ```
 
 If you do not need the conversion, simply remove the --convert_to_canonical option. Also, make sure that you have installed the following packages on the CPU beforehand:
