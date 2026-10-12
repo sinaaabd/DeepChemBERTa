@@ -64,9 +64,7 @@ def parse_to_standard(data_dir, with_label=True):
     data.loc[high_mask, tsa_col] = 6 + (data.loc[high_mask, tsa_col] - high_min) * (7 - 6) / (high_max - high_min)
     # END: Rescale the values Higher than 6.0 and less than -6.0
     
-    protein_feature = np.stack(
-        [get_ESM3_embeddings(seq) for seq in  data["Sequence"]]
-    )
+    protein_sequences = data["Sequence"].to_numpy()
     drug_feature = np.stack([generate_morgan_fp(s) for s in data["Canonical SMILES"]])
     chemberta_features = np.stack(
         [get_ChemBERTa_embeddings(smiles) for smiles in  data["Canonical SMILES"]]
@@ -87,11 +85,19 @@ def parse_to_standard(data_dir, with_label=True):
         therm_values = data[tsa_col].values
         weights = data['weight'].values
         
-        return_dic = {"protein_feature": protein_feature, "drug_feature": drug_feature, "chemberta_features": chemberta_features, "therm_values": therm_values, "sample_weight": weights}
-        return return_dic
+        return {
+            "protein_sequences": protein_sequences,
+            "drug_feature": drug_feature,
+            "chemberta_features": chemberta_features,
+            "therm_values": therm_values,
+            "sample_weight": weights
+        }
     else:
-        return {"protein_feature": protein_feature, "drug_feature": drug_feature, "chemberta_features": chemberta_features}
-
+        return {
+            "protein_sequences": protein_sequences,
+            "drug_feature": drug_feature,
+            "chemberta_features": chemberta_features
+        }
 
 
 def parse_for_inference(data_dir):
@@ -213,12 +219,16 @@ def run_deepchemberta(data_path, result_path=None, load_modell=None, save_model=
         data_path_train = os.path.join(data_path, f'{train}.csv')
         train_dic = parse_to_standard(data_path_train, with_label=True)
         
-        train_dic = {"protein_feature": train_dic["protein_feature"], "drug_feature": train_dic["drug_feature"], "chemberta_features":  train_dic["chemberta_features"], "therm_values": train_dic["therm_values"], "sample_weight": train_dic["sample_weight"]}
-        
+        train_dic = {
+            "protein_sequences": train_dic["protein_sequences"],
+            "drug_feature": train_dic["drug_feature"],
+            "chemberta_features": train_dic["chemberta_features"],
+            "therm_values": train_dic["therm_values"],
+            "sample_weight": train_dic["sample_weight"]
+        }
+
+        train_dic["protein_embedding_dic"] = esm3_embeddings_dic
         train_dic.update(train_params)
-        print(train_dic['protein_feature'].shape)
-        print(train_dic['chemberta_features'].shape)
-        print(train_dic['drug_feature'].shape)
         # Training Time
         train_start = time.time()
         if(validation):
@@ -230,7 +240,7 @@ def run_deepchemberta(data_path, result_path=None, load_modell=None, save_model=
 
                 data_path_val = os.path.join(data_path, f'{validation}.csv')
                 val_dic = parse_to_standard(data_path_val, with_label=True)
-                
+                val_dic["protein_embedding_dic"] = esm3_embeddings_dic
                 val_dic = {"test": val_dic}
                 current_rmse = test_tsa_model(dti_prediction_model, val_dic, result_path, validation, True)
                 print(f'Epoch RMSE: {current_rmse}')
@@ -262,6 +272,7 @@ def run_deepchemberta(data_path, result_path=None, load_modell=None, save_model=
         data_path_test = os.path.join(data_path, f'{test}.csv')
         inference_start = time.time()
         test_dic = parse_to_standard(data_path_test, with_label=True)
+        test_dic["protein_embedding_dic"] = esm3_embeddings_dic
         test_dic = {"test": test_dic}
         rmse = test_tsa_model(dti_prediction_model, test_dic, result_path, test, False)
         print(f"MSE = {rmse}")
@@ -288,72 +299,192 @@ def run_deepchemberta(data_path, result_path=None, load_modell=None, save_model=
             
     return result_df
 
+
+
 def test_tsa_model(model, test_dic, result_path, test, is_validation=False):
     inference_start = time.time()
-    test_predicted = model.predict(**test_dic)
+
+    batch_size = 128
+    data = test_dic["test"]
+
+    # --------------------------------------------------
+    # 1. Batchwise prediction
+    # --------------------------------------------------
+    test_predicted = model.predict(batch_size=batch_size, **test_dic)
     inference_end = time.time()
 
     test_predicted = test_predicted["test"]
-    therm_pred = np.squeeze(test_predicted["predicted"])
-    therm_true = np.squeeze(test_predicted["therm_true"])
-    
+
+    therm_pred = np.asarray(
+        test_predicted["predicted"]
+    ).reshape(-1)
+
+    therm_true = np.asarray(
+        test_predicted["therm_true"]
+    ).reshape(-1)
+
+    # --------------------------------------------------
+    # 2. Classification metrics
+    # --------------------------------------------------
     y_pred_bin = (therm_pred >= 0.5).astype(int)
     y_true_bin = (therm_true >= 0.5).astype(int)
-    precision = precision_score(y_true_bin, y_pred_bin, zero_division=0)
-    recall = recall_score(y_true_bin, y_pred_bin, zero_division=0)
-    f1 = f1_score(y_true_bin, y_pred_bin, zero_division=0)
-    print(f"Therm   → Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
 
-    # Evaluate full model with all outputs
-    test_loss = model._Drug_Target_Prediction__model_t.evaluate(
-        x = [test_dic["test"]["chemberta_features"],
-           test_dic["test"]["drug_feature"],
-           test_dic["test"]["protein_feature"]],
-        y = therm_true,
-        verbose=0
+    precision = precision_score(
+        y_true_bin, y_pred_bin, zero_division=0
+    )
+    recall = recall_score(
+        y_true_bin, y_pred_bin, zero_division=0
+    )
+    f1 = f1_score(
+        y_true_bin, y_pred_bin, zero_division=0
     )
 
-    if is_validation:
-        model.training_losses["Validation Loss"].append(test_loss[0])
+    print(
+        f"Therm   → Precision: {precision:.4f}, "
+        f"Recall: {recall:.4f}, F1: {f1:.4f}"
+    )
 
-    print(f'Validation/Test Loss={test_loss[0]}')
-    for name, val in zip(model._Drug_Target_Prediction__model_t.metrics_names, test_loss):
+    # --------------------------------------------------
+    # 3. Batchwise evaluation loss
+    # --------------------------------------------------
+    keras_model = model._Drug_Target_Prediction__model_t
+
+    n_samples = len(data["protein_sequences"])
+    batch_results = []
+
+    for start in range(0, n_samples, batch_size):
+        end = min(start + batch_size, n_samples)
+
+        # Create protein embeddings only for this batch.
+        protein_batch = np.stack([
+            data["protein_embedding_dic"][seq]
+            for seq in data["protein_sequences"][start:end]
+        ]).astype(np.float32, copy=False)
+
+        chemberta_batch = np.asarray(
+            data["chemberta_features"][start:end],
+            dtype=np.float32,
+        )
+
+        drug_batch = np.asarray(
+            data["drug_feature"][start:end],
+            dtype=np.float32,
+        )
+
+        labels_batch = np.asarray(
+            data["therm_values"][start:end],
+            dtype=np.float32,
+        ).reshape(-1)
+
+        batch_result = keras_model.evaluate(
+            [
+                chemberta_batch,
+                drug_batch,
+                protein_batch,
+            ],
+            labels_batch,
+            verbose=0,
+            return_dict=True,
+        )
+
+        batch_results.append((len(labels_batch), batch_result))
+
+    # Sample-weighted average of the batch metrics.
+    total_samples = sum(size for size, _ in batch_results)
+
+    test_loss = {
+        metric_name: sum(
+            size * result[metric_name]
+            for size, result in batch_results
+        ) / total_samples
+        for metric_name in batch_results[0][1]
+    }
+
+    if is_validation:
+        model.training_losses["Validation Loss"].append(
+            test_loss["loss"]
+        )
+
+    print(f"Validation/Test Loss={test_loss['loss']:.6f}")
+
+    for name, val in test_loss.items():
         print(f"{name}: {val}")
 
-    # Regression Metrics
-    therm_rmse = np.sqrt(mean_squared_error(therm_true, therm_pred))
-    therm_mae = mean_absolute_error(therm_true, therm_pred)
-    therm_r2 = r2_score(therm_true, therm_pred)
+    # --------------------------------------------------
+    # 4. Regression metrics across all samples
+    # --------------------------------------------------
+    therm_rmse = np.sqrt(
+        mean_squared_error(therm_true, therm_pred)
+    )
 
-    print(f"Therm   → RMSE: {therm_rmse:.4f}, MAE: {therm_mae:.4f}, R²: {therm_r2:.4f}")
+    therm_mae = mean_absolute_error(
+        therm_true, therm_pred
+    )
 
-    # Save results
-    name_of_result = test.split('.csv')[0]
+    therm_r2 = r2_score(
+        therm_true, therm_pred
+    )
+
+    print(
+        f"Therm   → RMSE: {therm_rmse:.4f}, "
+        f"MAE: {therm_mae:.4f}, R²: {therm_r2:.4f}"
+    )
+
+    # --------------------------------------------------
+    # 5. Save predictions and metrics
+    # --------------------------------------------------
+    name_of_result = test.split(".csv")[0]
+
     result_df = pd.DataFrame({
         "predicted": therm_pred,
-        "therm_true": therm_true
+        "therm_true": therm_true,
     })
 
     if not is_validation:
-        print(f"\tInference time: {inference_end - inference_start:.2f} sec")
-        if result_path is not None:
-            result_df.to_csv(f"{result_path}/prediction_{name_of_result}.csv", index=False)
+        print(
+            f"\tInference time: "
+            f"{inference_end - inference_start:.2f} sec"
+        )
 
-        metrics_df = pd.DataFrame({
-            "Therm_RMSE": [therm_rmse],
-            "Therm_MAE": [therm_mae],
-            "Therm_R2": [therm_r2]
-        })
-        metrics_df.to_csv(f"{result_path}/Result_{name_of_result}.csv", index=False)
+        if result_path is not None:
+            result_df.to_csv(
+                f"{result_path}/prediction_{name_of_result}.csv",
+                index=False,
+            )
+
+            metrics_df = pd.DataFrame({
+                "Therm_RMSE": [therm_rmse],
+                "Therm_MAE": [therm_mae],
+                "Therm_R2": [therm_r2],
+            })
+
+            metrics_df.to_csv(
+                f"{result_path}/Result_{name_of_result}.csv",
+                index=False,
+            )
+
+    # --------------------------------------------------
+    # 6. Filtered RMSE
+    # --------------------------------------------------
     mask = (therm_true > 0.5) | (therm_true < -0.8)
+
     filtered_true = therm_true[mask]
     filtered_pred = therm_pred[mask]
-    filtered_rmse = 100
-    print(f"Filtered samples: {np.sum(mask)} / {len(therm_true)}")
-    if len(filtered_true) > 0:
-        filtered_rmse = np.sqrt(mean_squared_error(filtered_true, filtered_pred))
-    else:
-        filtered_rmse = np.nan  # Avoid crash if no samples
 
-    print(f"Filtered RMSE (therm_true > 0.5 or < -0.8): {filtered_rmse:.4f}")
+    print(
+        f"Filtered samples: {np.sum(mask)} / {len(therm_true)}"
+    )
+
+    if len(filtered_true) > 0:
+        filtered_rmse = np.sqrt(
+            mean_squared_error(filtered_true, filtered_pred)
+        )
+    else:
+        filtered_rmse = np.nan
+
+    print(
+        "Filtered RMSE (therm_true > 0.5 or < -0.8): "
+        f"{filtered_rmse:.4f}"
+    )
+
     return filtered_rmse

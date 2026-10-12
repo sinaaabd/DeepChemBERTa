@@ -201,19 +201,98 @@ class Drug_Target_Prediction(object):
         model_f = Model(inputs=[input_chemberta, input_d, input_p], outputs=model_t)
         return model_f
 
-    def fit(self, chemberta_features, drug_feature, protein_feature, therm_values, sample_weight=None, batch_size=64):
+    
+    def fit(
+        self,
+        chemberta_features,
+        drug_feature,
+        protein_sequences,
+        protein_embedding_dic,
+        therm_values,
+        sample_weight=None,
+        batch_size=128
+    ):
+        n_samples = len(protein_sequences)
+
+        if sample_weight is None:
+            sample_weight = np.ones(n_samples, dtype=np.float32)
+
+        def batch_generator():
+            # Shuffle samples each epoch
+            indices = np.random.permutation(n_samples)
+
+            for start in range(0, n_samples, batch_size):
+                batch_idx = indices[start:start + batch_size]
+
+                batch_sequences = protein_sequences[batch_idx]
+
+                # Stack only the embeddings for this batch
+                batch_protein = np.stack([
+                    protein_embedding_dic[seq]
+                    for seq in batch_sequences
+                ]).astype(np.float32, copy=False)
+
+                batch_c = np.asarray(
+                    chemberta_features[batch_idx],
+                    dtype=np.float32
+                )
+                batch_d = np.asarray(
+                    drug_feature[batch_idx],
+                    dtype=np.float32
+                )
+                batch_y = np.asarray(
+                    therm_values[batch_idx],
+                    dtype=np.float32
+                ).reshape(-1)
+
+                batch_w = np.asarray(
+                    sample_weight[batch_idx],
+                    dtype=np.float32
+                )
+
+                yield (
+                    (batch_c, batch_d, batch_protein),
+                    batch_y,
+                    batch_w
+                )
+
+        dataset = tf.data.Dataset.from_generator(
+            batch_generator,
+            output_signature=(
+                (
+                    tf.TensorSpec(
+                        shape=(None, self.__drug_chemberta_len),
+                        dtype=tf.float32
+                    ),
+                    tf.TensorSpec(
+                        shape=(None, self.__drug_len),
+                        dtype=tf.float32
+                    ),
+                    tf.TensorSpec(
+                        shape=(None, self.__prot_len, self.__aa_dim),
+                        dtype=tf.float32
+                    )
+                ),
+                tf.TensorSpec(shape=(None,), dtype=tf.float32),
+                tf.TensorSpec(shape=(None,), dtype=tf.float32)
+            )
+        )
+
+        steps_per_epoch = (n_samples + batch_size - 1) // batch_size
+
         history = self.__model_t.fit(
-            [chemberta_features, drug_feature, protein_feature],
-            therm_values,
-            sample_weight=sample_weight,
+            dataset,
             epochs=1,
-            batch_size=batch_size,
-            shuffle=True,
+            steps_per_epoch=steps_per_epoch,
             verbose=1
         )
-        training_loss = history.history['loss'][0]
-        self.training_losses["Training Loss"].append(training_loss)
+
+        self.training_losses["Training Loss"].append(
+            history.history["loss"][0]
+        )
+
         return self.__model_t
+
 
     def summary(self):
         self.__model_t.summary()
@@ -225,32 +304,71 @@ class Drug_Target_Prediction(object):
         self.__model_t = tf.keras.models.load_model(input_file, custom_objects={
             "loss": variance_loss(lambda_var=0.1, delta=2.0),
             "variance_loss": variance_loss})
-        
+    
 
-    def predict(self, **kwargs):
+    
+    def predict(self, batch_size=128, **kwargs):
         results_dic = {}
-        for dataset in kwargs:
-            result_dic = {}
-            test_c = kwargs[dataset]["chemberta_features"]
-            test_p = kwargs[dataset]["protein_feature"]
-            test_d = kwargs[dataset]["drug_feature"]
-            # True TSA value for regression
-            result_dic["therm_true"] = kwargs[dataset]["therm_values"]     # z-scored
-            # Predicted value for TSA
-            result_dic["predicted"] = self.__model_t.predict(
-                [test_c, test_d, test_p],
-                verbose=0
+
+        for dataset_name, data in kwargs.items():
+            inference_result = self.inference(
+                batch_size=batch_size,
+                **{dataset_name: data},
             )
-            results_dic[dataset] = result_dic
+
+            results_dic[dataset_name] = {
+                "therm_true": data["therm_values"],
+                "predicted": inference_result[dataset_name]["predicted"],
+            }
+
         return results_dic
 
-    def inference(self, **kwargs):
+
+    
+    def inference(self, batch_size=128, **kwargs):
         results_dic = {}
-        for dataset in kwargs:
-            result_dic = {}
-            test_c = kwargs[dataset]["chemberta_features"] 
-            test_p = kwargs[dataset]["protein_feature"]
-            test_d = kwargs[dataset]["drug_feature"]
-            result_dic["predicted"] = self.__model_t.predict([test_c, test_d, test_p])
-            results_dic[dataset] = result_dic
-        return results_dic  
+
+        for dataset_name, data in kwargs.items():
+            chemberta_features = data["chemberta_features"]
+            drug_feature = data["drug_feature"]
+            protein_sequences = data["protein_sequences"]
+            protein_embedding_dic = data["protein_embedding_dic"]
+
+            n_samples = len(protein_sequences)
+            predictions = []
+
+            for start in range(0, n_samples, batch_size):
+                end = min(start + batch_size, n_samples)
+
+                # Only construct protein embeddings for the current batch.
+                protein_batch = np.stack([
+                    protein_embedding_dic[seq]
+                    for seq in protein_sequences[start:end]
+                ]).astype(np.float32, copy=False)
+
+                chemberta_batch = np.asarray(
+                    chemberta_features[start:end], dtype=np.float32
+                )
+
+                drug_batch = np.asarray(
+                    drug_feature[start:end], dtype=np.float32
+                )
+
+                # Pass all three inputs explicitly to Keras.
+                batch_predictions = self.__model_t(
+                    [
+                        chemberta_batch,
+                        drug_batch,
+                        protein_batch,
+                    ],
+                    training=False,
+                ).numpy()
+
+                predictions.append(batch_predictions)
+
+            results_dic[dataset_name] = {
+                "predicted": np.concatenate(predictions, axis=0)
+            }
+
+        return results_dic
+
