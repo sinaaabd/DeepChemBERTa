@@ -1,7 +1,7 @@
 # DeepChemBERTa_Satbilization
 
 ## DeepChemBERTa Architecture
-DeepChemBERTa_Stabilization utilizes trainable embeddings to encode amino acids of proteins and utilizes Morgan drug fingerprint and ChemBERTa embeddings to capture the features of compounds. It uses several convolutional windows with different sizes to capture both local and global features of protein. DeepChemBERTa utilizes a Power-law weighting system with alpha=0.35. Besides, it utilizes batch variance penalty and Huber (delta=2.0) as a loss function, where batch size should be more than 128.
+DeepChemBERTa_Stabilization utilizes ESM3 embeddings to encode amino acids of proteins and utilizes Morgan drug fingerprint and ChemBERTa embeddings to capture the features of compounds. It uses several convolutional windows with different sizes to capture both local and global features of protein. DeepChemBERTa utilizes a Power-law weighting system with alpha=0.35. Besides, it utilizes batch variance penalty and Huber (delta=2.0) as a loss function, where batch size should be more than 128.
 DeepChemBERTa_Stabilization predicts thermal shift assay values.
 
 ### Prerequisite
