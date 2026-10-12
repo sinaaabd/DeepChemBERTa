@@ -205,7 +205,7 @@ def run_deepchemberta(data_path, result_path=None, load_modell=None, save_model=
     if(load_modell):
         print(f">>>>>>>>>>>>>>>>> Loading the model (DeepChemBERTa: Compound-based Stabilization Predictor): {load_modell}")
         dti_prediction_model.load(f'saved_models/{load_modell}')
-    dti_prediction_model.summary()
+    #dti_prediction_model.summary()
     
     #########################################Training Section#########################################
     if(train):
